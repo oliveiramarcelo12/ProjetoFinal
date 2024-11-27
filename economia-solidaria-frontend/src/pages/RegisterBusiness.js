@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, addDoc } from "firebase/firestore";
-import { db } from "../firebase"; // Certifique-se de importar o 'db'
-import { getAuth } from "firebase/auth"; // Para pegar o UID do usuário autenticado
+import { db } from "../firebase";
+import { getAuth } from "firebase/auth";
+import axios from "axios";  // Importando o Axios
 import "../styles/registerbusiness.css";
-import { validateForm } from "../components/validation"; // Importa a função de validação
+import { validateForm } from "../components/validation";
 
 const RegisterBusiness = () => {
   const [businessName, setBusinessName] = useState("");
@@ -22,49 +23,23 @@ const RegisterBusiness = () => {
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
-
   const auth = getAuth();
   const user = auth.currentUser;
   const userUid = user ? user.uid : null;
 
-  // Função para formatar o CNPJ
-  const formatCNPJ = (cnpj) => {
-    const cleaned = cnpj.replace(/[^\d]/g, ""); // Remove qualquer caractere não numérico
-    if (cleaned.length <= 14) {
-      return cleaned.replace(
-        /^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,
-        "$1.$2.$3/$4-$5"
+  // Função para buscar coordenadas com o endereço
+  const fetchCoordinates = async (address) => {
+    try {
+      const response = await axios.get(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${address}&key=AIzaSyCf9D4DX8YXkrU73iXo-KlK0ORQmRBrMBo`
       );
+      const location = response.data.results[0]?.geometry.location;
+      return location ? { lat: location.lat, lng: location.lng } : null;
+    } catch (error) {
+      console.error("Erro ao buscar coordenadas:", error);
+      setError("Erro ao obter as coordenadas do endereço.");
+      return null;
     }
-    return cnpj;
-  };
-
-  // Função para formatar o telefone
-  const formatPhone = (phone) => {
-    const cleaned = phone.replace(/[^\d]/g, ""); // Remove qualquer caractere não numérico
-    if (cleaned.length <= 11) {
-      return cleaned.replace(/^(\d{2})(\d{5})(\d{4})$/, "($1) $2-$3");
-    }
-    return phone;
-  };
-
-  const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length + images.length > 6) {
-      setError("Você pode enviar no máximo 6 imagens do seu negócio.");
-    } else {
-      const invalidFiles = files.filter((file) => file.size > 5 * 1024 * 1024); // Limite de 5MB por imagem
-      if (invalidFiles.length > 0) {
-        setError("Cada imagem deve ter no máximo 5 MB.");
-      } else {
-        setImages((prevImages) => [...prevImages, ...files]);
-        setError(""); // Limpa o erro ao adicionar novas imagens
-      }
-    }
-  };
-
-  const removeImage = (index) => {
-    setImages(images.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e) => {
@@ -85,7 +60,7 @@ const RegisterBusiness = () => {
     });
 
     if (validationError) {
-      setError(validationError); // Exibe a mensagem de erro de validação
+      setError(validationError);
       return;
     }
 
@@ -93,6 +68,14 @@ const RegisterBusiness = () => {
     setError(""); // Limpa a mensagem de erro antes de tentar enviar
 
     try {
+      // Buscar coordenadas do endereço
+      const coordinates = await fetchCoordinates(address);
+      if (!coordinates) {
+        setError("Não foi possível obter as coordenadas do endereço.");
+        setLoading(false);
+        return;
+      }
+
       const imageBase64Promises = images.map(async (image) => {
         const reader = new FileReader();
         return new Promise((resolve, reject) => {
@@ -104,6 +87,7 @@ const RegisterBusiness = () => {
 
       const imageBase64 = await Promise.all(imageBase64Promises);
 
+      // Enviar os dados para o Firestore, incluindo as coordenadas
       await addDoc(collection(db, "negocios_pendentes"), {
         nome: businessName,
         cnpj: businessCNPJ,
@@ -114,9 +98,10 @@ const RegisterBusiness = () => {
         email,
         horarioDeFuncionamento: workingHours,
         imagens: imageBase64,
-        comprovante: cnDoc.name, // Salva o nome do arquivo do comprovante
-        userId: userUid, // Adiciona o UID do usuário
+        comprovante: cnDoc.name,
+        userId: userUid,
         status: "pendente", // Definindo o status como "pendente"
+        coordenadas: coordinates, // Adiciona as coordenadas no Firestore
       });
 
       alert("Cadastro enviado, aguardando aprovação do admin!");
@@ -127,6 +112,30 @@ const RegisterBusiness = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Função para formatar o CNPJ (apenas para exibição)
+  const formatCNPJ = (cnpj) => {
+    if (!cnpj) return cnpj;
+    return cnpj.replace(/\D/g, "")
+      .replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  };
+
+  // Função para formatar o telefone
+  const formatPhone = (phone) => {
+    if (!phone) return phone;
+    return phone.replace(/\D/g, "")
+      .replace(/^(\d{2})(\d{4,5})(\d{4})$/, "($1) $2-$3");
+  };
+
+  // Função para lidar com o upload das imagens
+  const handleImageUpload = (e) => {
+    setImages([...e.target.files]);
+  };
+
+  // Função para remover uma imagem do estado
+  const removeImage = (index) => {
+    setImages(images.filter((_, i) => i !== index));
   };
 
   return (
@@ -266,7 +275,7 @@ const RegisterBusiness = () => {
             required
           />
           <label htmlFor="terms">
-            Aceito os <strong>termos e condições</strong>
+            Aceito os <strong>termos de serviço</strong>
           </label>
         </div>
 
