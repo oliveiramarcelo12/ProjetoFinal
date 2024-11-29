@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { collection, getDocs, query, where, doc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { getAuth } from "firebase/auth";
-import { useNavigate } from "react-router-dom"; // Alterado para useNavigate
+import { useNavigate } from "react-router-dom";
 import "../styles/MyBusinesses.css";
 
 // Componente para renderizar cada negócio
@@ -10,46 +10,49 @@ const BusinessItem = ({ business, onEdit }) => (
   <li className="business-item">
     <h3 className="business-name">{business.nome}</h3>
     <p className="business-status">
-      Status: 
+      Status:{" "}
       {business.status === "pendente"
         ? "Aguardando aprovação"
         : business.status === "aprovado"
         ? "Aprovado"
         : "Negado"}
     </p>
-    {/* Botão de editar */}
-    <button className="edit-button" onClick={() => onEdit(business)}>Editar</button>
+    <button className="edit-button" onClick={() => onEdit(business)}>
+      Editar
+    </button>
   </li>
 );
 
-// Componente Modal de Edição
+// Modal de Edição
 const EditBusinessModal = ({ business, onClose, onSave }) => {
-  const [businessName, setBusinessName] = useState(business.nome);
-  const [businessCNPJ, setBusinessCNPJ] = useState(business.cnpj);
-  const [businessDescription, setBusinessDescription] = useState(business.descricao);
-  const [category, setCategory] = useState(business.categoria);
-  const [address, setAddress] = useState(business.endereco);
-  const [phone, setPhone] = useState(business.telefone);
-  const [email, setEmail] = useState(business.email);
-  const [workingHours, setWorkingHours] = useState(business.horarioDeFuncionamento);
+  const [form, setForm] = useState({
+    nome: business.nome,
+    cnpj: business.cnpj,
+    descricao: business.descricao,
+    categoria: business.categoria,
+    endereco: business.endereco,
+    telefone: business.telefone,
+    email: business.email,
+    horarioDeFuncionamento: business.horarioDeFuncionamento,
+  });
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setLoading(true);
     try {
       const businessRef = doc(db, "lojas", business.id);
-      await updateDoc(businessRef, {
-        nome: businessName,
-        cnpj: businessCNPJ,
-        descricao: businessDescription,
-        categoria: category,
-        endereco: address,
-        telefone: phone,
-        email: email,
-        horarioDeFuncionamento: workingHours,
-      });
-      onSave(); // Salva as mudanças e fecha o modal
+      await updateDoc(businessRef, form);
+      onSave();
     } catch (error) {
       console.error("Erro ao atualizar loja:", error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -58,125 +61,77 @@ const EditBusinessModal = ({ business, onClose, onSave }) => {
       <div className="modal-content">
         <h2>Editar Loja</h2>
         <form onSubmit={handleSubmit}>
-          <label>
-            Nome:
-            <input
-              type="text"
-              value={businessName}
-              onChange={(e) => setBusinessName(e.target.value)}
-            />
-          </label>
-          <label>
-            CNPJ:
-            <input
-              type="text"
-              value={businessCNPJ}
-              onChange={(e) => setBusinessCNPJ(e.target.value)}
-            />
-          </label>
-          <label>
-            Descrição:
-            <textarea
-              value={businessDescription}
-              onChange={(e) => setBusinessDescription(e.target.value)}
-            />
-          </label>
-          <label>
-            Categoria:
-            <input
-              type="text"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            />
-          </label>
-          <label>
-            Endereço:
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
-          </label>
-          <label>
-            Telefone:
-            <input
-              type="text"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-            />
-          </label>
-          <label>
-            E-mail:
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label>
-            Horário de Funcionamento:
-            <input
-              type="text"
-              value={workingHours}
-              onChange={(e) => setWorkingHours(e.target.value)}
-            />
-          </label>
-          <button type="submit">Salvar</button>
-          <button type="button" onClick={onClose}>Cancelar</button>
+          {Object.keys(form).map((key) => (
+            <label key={key}>
+              {key.charAt(0).toUpperCase() + key.slice(1)}:
+              <input
+                type="text"
+                name={key}
+                value={form[key]}
+                onChange={handleChange}
+                required
+              />
+            </label>
+          ))}
+          <button type="submit" disabled={loading}>
+            {loading ? "Salvando..." : "Salvar"}
+          </button>
+          <button type="button" onClick={onClose} disabled={loading}>
+            Cancelar
+          </button>
         </form>
       </div>
     </div>
   );
 };
 
+// Componente Principal
 const MyBusinesses = () => {
   const [businesses, setBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [editingBusiness, setEditingBusiness] = useState(null); // Novo estado para controle do modal
-  const navigate = useNavigate(); // Alterado para useNavigate
+  const [editingBusiness, setEditingBusiness] = useState(null);
 
   const auth = getAuth();
   const user = auth.currentUser;
 
-  useEffect(() => {
-    const fetchBusinesses = async () => {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        const q = query(collection(db, "lojas"), where("userId", "==", user.uid));
-        const querySnapshot = await getDocs(q);
-        const userBusinesses = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setBusinesses(userBusinesses);
-      } catch (error) {
-        console.error("Erro ao buscar negócios do usuário:", error);
-        setError("Ocorreu um erro ao carregar seus negócios. Tente novamente mais tarde.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchBusinesses();
+  const fetchBusinesses = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const q = query(collection(db, "lojas"), where("userId", "==", user.uid));
+      const querySnapshot = await getDocs(q);
+      const userBusinesses = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setBusinesses(userBusinesses);
+    } catch (error) {
+      console.error("Erro ao buscar negócios do usuário:", error);
+      setError("Ocorreu um erro ao carregar seus negócios. Tente novamente mais tarde.");
+    } finally {
+      setLoading(false);
+    }
   }, [user]);
 
+  useEffect(() => {
+    fetchBusinesses();
+  }, [fetchBusinesses]);
+
   const handleEdit = (business) => {
-    setEditingBusiness(business); // Abre o modal com os dados do negócio
+    setEditingBusiness(business);
   };
 
   const handleCloseModal = () => {
-    setEditingBusiness(null); // Fecha o modal
+    setEditingBusiness(null);
   };
 
   const handleSaveChanges = () => {
-    // Recarrega os dados dos negócios após salvar
-    setEditingBusiness(null);
-    fetchBusinesses(); // Atualiza a lista de negócios
+    handleCloseModal();
+    fetchBusinesses();
   };
 
   if (loading) {
@@ -188,25 +143,16 @@ const MyBusinesses = () => {
       <h2>Meus Negócios</h2>
       {error ? (
         <p className="error-text">{error}</p>
+      ) : businesses.length === 0 ? (
+        <p className="no-businesses-text">Você ainda não tem negócios cadastrados.</p>
       ) : (
-        <div>
-          {businesses.length === 0 ? (
-            <p className="no-businesses-text">Você ainda não tem negócios cadastrados.</p>
-          ) : (
-            <ul className="business-list">
-              {businesses.map((business) => (
-                <BusinessItem
-                  key={business.id}
-                  business={business}
-                  onEdit={handleEdit}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+        <ul className="business-list">
+          {businesses.map((business) => (
+            <BusinessItem key={business.id} business={business} onEdit={handleEdit} />
+          ))}
+        </ul>
       )}
 
-      {/* Modal de Edição */}
       {editingBusiness && (
         <EditBusinessModal
           business={editingBusiness}

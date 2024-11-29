@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { collection, addDoc } from "firebase/firestore";
-import { db } from "../firebase"; // Certifique-se de importar o 'db'
-import { getAuth } from "firebase/auth"; // Para pegar o UID do usuário autenticado
+import { db } from "../firebase";
+import { getAuth } from "firebase/auth";
 import "../styles/registerbusiness.css";
-import { validateForm } from "../components/validation"; // Importa a função de validação
+import { validateForm } from "../components/validation";
 
 const RegisterBusiness = () => {
   const [businessName, setBusinessName] = useState("");
@@ -12,6 +12,7 @@ const RegisterBusiness = () => {
   const [businessDescription, setBusinessDescription] = useState("");
   const [category, setCategory] = useState("");
   const [address, setAddress] = useState("");
+  const [cep, setCep] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [workingHours, setWorkingHours] = useState("");
@@ -22,146 +23,132 @@ const RegisterBusiness = () => {
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
-
   const auth = getAuth();
   const user = auth.currentUser;
   const userUid = user ? user.uid : null;
 
-  // Função para formatar o CNPJ
+  const fetchAddressByCep = async (cep) => {
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await response.json();
+      if (data && !data.erro) {
+        setAddress(`${data.logradouro}, ${data.bairro}, ${data.localidade} - ${data.uf}`);
+      } else {
+        setError("CEP não encontrado.");
+      }
+    } catch {
+      setError("Erro ao buscar o CEP.");
+    }
+  };
+
   const formatCNPJ = (cnpj) => {
-    const cleaned = cnpj.replace(/[^\d]/g, ""); // Remove qualquer caractere não numérico
+    const cleaned = cnpj.replace(/[^\d]/g, "");
     if (cleaned.length <= 14) {
-      return cleaned.replace(
-        /^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,
-        "$1.$2.$3/$4-$5"
-      );
+      return cleaned.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
     }
     return cnpj;
   };
 
-  // Função para formatar o telefone
   const formatPhone = (phone) => {
-    const cleaned = phone.replace(/[^\d]/g, ""); // Remove qualquer caractere não numérico
+    const cleaned = phone.replace(/[^\d]/g, "");
     if (cleaned.length <= 11) {
       return cleaned.replace(/^(\d{2})(\d{5})(\d{4})$/, "($1) $2-$3");
     }
     return phone;
   };
 
-const resizeImage = (file, maxWidth = 1024, maxHeight = 1024) => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const reader = new FileReader();
+  const resizeImage = (file, maxWidth = 1024, maxHeight = 1024) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const reader = new FileReader();
 
-    reader.onload = (e) => {
-      img.src = e.target.result;
-    };
+      reader.onload = (e) => (img.src = e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
 
-    reader.onerror = reject;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
 
-    reader.readAsDataURL(file);
+        let { width, height } = img;
 
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-
-      let width = img.width;
-      let height = img.height;
-
-      // Calcula a escala para redimensionar a imagem mantendo a proporção
-      if (width > height) {
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
+        if (width > height) {
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
         }
-      } else {
-        if (height > maxHeight) {
-          width = (width * maxHeight) / height;
-          height = maxHeight;
-        }
-      }
 
-      canvas.width = width;
-      canvas.height = height;
-      ctx.drawImage(img, 0, 0, width, height);
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
 
-      canvas.toBlob(
-        (blob) => {
-          resolve(blob);
-        },
-        file.type,
-        0.8
-      ); // Compressão de 80%
-    };
-  });
-};
-
-const handleImageUpload = async (e) => {
-  const files = Array.from(e.target.files);
-
-  // Verifica se a quantidade total de imagens será maior que 6
-  if (files.length + images.length > 6) {
-    setError("Você pode enviar no máximo 6 imagens do seu negócio.");
-    return;
-  }
-
-  // Verifica se algum arquivo excede o tamanho de 10MB
-  const invalidFiles = files.filter((file) => file.size > 10 * 1024 * 1024);
-  if (invalidFiles.length > 0) {
-    setError("Cada imagem deve ter no máximo 10 MB.");
-    return;
-  }
-
-  // Redimensiona as imagens antes de adicionar
-  const resizedImages = await Promise.all(
-    files.map((file) => resizeImage(file))
-  );
-
-  // Atualiza o estado com as imagens redimensionadas
-  setImages((prevImages) => [...prevImages, ...resizedImages]);
-  setError(""); // Limpa a mensagem de erro
-};
-
-  const removeImage = (index) => {
-    setImages(images.filter((_, i) => i !== index));
+        canvas.toBlob((blob) => resolve(blob), file.type, 0.8);
+      };
+    });
   };
+
+  const handleImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+
+    if (files.length + images.length > 6) {
+      setError("Você pode enviar no máximo 6 imagens.");
+      return;
+    }
+
+    const invalidFiles = files.filter((file) => file.size > 10 * 1024 * 1024);
+    if (invalidFiles.length > 0) {
+      setError("Cada imagem deve ter no máximo 10 MB.");
+      return;
+    }
+
+    const resizedImages = await Promise.all(files.map((file) => resizeImage(file)));
+    setImages((prevImages) => [...prevImages, ...resizedImages]);
+    setError("");
+  };
+
+  const removeImage = (index) => setImages(images.filter((_, i) => i !== index));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-   // Chama a função de validação
-   const validationError = validateForm({
-     businessName,
-     businessCNPJ,
-     businessDescription,
-     category,
-     address,
-     phone,
-     email,
-     images,
-     cnDoc,
-     termsAccepted,
-   });
+    const validationError = validateForm({
+      businessName,
+      businessCNPJ,
+      businessDescription,
+      category,
+      address,
+      phone,
+      email,
+      images,
+      cnDoc,
+      termsAccepted,
+    });
 
-   if (validationError) {
-     setError(validationError); // Exibe a mensagem de erro de validação
-     return;
-   }
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
 
-   setLoading(true);
-   setError(""); // Limpa a mensagem de erro antes de tentar enviar
+    setLoading(true);
+    setError("");
 
     try {
       const imageBase64Promises = images.map(async (image) => {
         const reader = new FileReader();
         return new Promise((resolve, reject) => {
-          reader.onloadend = () => resolve(reader.result); // Salva o resultado em base64
+          reader.onloadend = () => resolve(reader.result);
           reader.onerror = reject;
           reader.readAsDataURL(image);
         });
       });
 
-     const imageBase64 = await Promise.all(imageBase64Promises);
+      const imageBase64 = await Promise.all(imageBase64Promises);
 
       await addDoc(collection(db, "negocios_pendentes"), {
         nome: businessName,
@@ -173,13 +160,13 @@ const handleImageUpload = async (e) => {
         email,
         horarioDeFuncionamento: workingHours,
         imagens: imageBase64,
-        comprovante: cnDoc.name, // Salva o nome do arquivo do comprovante
-        userId: userUid, // Adiciona o UID do usuário
-        status: "pendente", // Definindo o status como "pendente"
+        comprovante: cnDoc.name,
+        userId: userUid,
+        status: "pendente",
       });
 
-      alert("Cadastro enviado, aguardando aprovação do admin!");
-      navigate("/"); // Após o envio, redireciona o usuário para a home
+      alert("Cadastro enviado, aguardando aprovação!");
+      navigate("/");
     } catch (err) {
       console.error("Erro ao cadastrar negócio:", err);
       setError("Erro ao cadastrar o negócio. Tente novamente.");
@@ -204,8 +191,9 @@ const handleImageUpload = async (e) => {
         <input
           type="text"
           placeholder="CNPJ"
-          value={formatCNPJ(businessCNPJ)}
+          value={businessCNPJ}
           onChange={(e) => setBusinessCNPJ(e.target.value)}
+          onBlur={() => setBusinessCNPJ(formatCNPJ(businessCNPJ))}
           required
         />
 
@@ -222,36 +210,38 @@ const handleImageUpload = async (e) => {
           required
         >
           <option value="">Selecione a Categoria</option>
-          <option value="restaurante">Restaurante</option>
-          <option value="loja">Loja</option>
-          <option value="servicos">Serviços</option>
-          <option value="artesanato">Artesanato</option>
-          <option value="beleza">Beleza e Estética</option>
-          <option value="educacao">Educação e Cursos</option>
-          <option value="saude">Saúde e Bem-estar</option>
-          <option value="esportes">Esportes e Lazer</option>
-          <option value="outro">Outro</option>
+          {/* Adicione suas categorias */}
         </select>
 
         <input
           type="text"
-          placeholder="Endereço Completo"
+          placeholder="CEP"
+          value={cep}
+          onChange={(e) => setCep(e.target.value)}
+          onBlur={() => fetchAddressByCep(cep)}
+          required
+        />
+
+        <input
+          type="text"
+          placeholder="Endereço"
           value={address}
           onChange={(e) => setAddress(e.target.value)}
           required
         />
 
         <input
-          type="tel"
-          placeholder="Telefone de Contato"
-          value={formatPhone(phone)}
+          type="text"
+          placeholder="Telefone"
+          value={phone}
           onChange={(e) => setPhone(e.target.value)}
+          onBlur={() => setPhone(formatPhone(phone))}
           required
         />
 
         <input
           type="email"
-          placeholder="E-mail para Contato"
+          placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
@@ -259,92 +249,28 @@ const handleImageUpload = async (e) => {
 
         <input
           type="text"
-          placeholder="Horários de Funcionamento"
+          placeholder="Horário de Funcionamento"
           value={workingHours}
           onChange={(e) => setWorkingHours(e.target.value)}
+          required
         />
 
-        <div className="upload-instructions">
-          <label htmlFor="businessImages">
-            <strong>
-              Carregue imagens do seu negócio (máximo de 6 imagens, máximo de
-              5MB cada)
-            </strong>
-          </label>
-          <input
-            type="file"
-            id="businessImages"
-            accept="image/*"
-            multiple
-            required
-            onChange={handleImageUpload}
-          />
+        <input type="file" accept="image/*" multiple onChange={handleImageUpload} />
+        <input type="file" accept="application/pdf" onChange={(e) => setCnDoc(e.target.files[0])} required />
 
-  {images.length > 0 && (
-    <div className="image-preview">
-      {images.map((image, index) => (
-        <div key={index} className="image-wrapper">
-          <img
-            src={URL.createObjectURL(image)}
-            alt={`preview ${index}`}
-            className="image-item"
-          />
-          <button
-            className="remove-image"
-            onClick={() => removeImage(index)}
-          >
-            X
-          </button>
-        </div>
-      ))}
-    </div>
-  )}
-</div>
-
-
-        {error && error.includes("Você pode enviar no máximo 6 imagens") && (
-          <div className="error">{error}</div>
-        )}
-        {error && error.includes("Pelo menos uma imagem") && (
-          <div className="error">{error}</div>
-        )}
-
-        <div className="upload-instructions">
-          <label htmlFor="cnDoc">
-            <strong>Comprovante do Simples Nacional</strong>
-          </label>
-          <input
-            type="file"
-            id="cnDoc"
-            accept="application/pdf"
-            onChange={(e) => setCnDoc(e.target.files[0])}
-            required
-          />
-        </div>
-
-        {error && !error.includes("Você pode enviar no máximo 6 imagens") && (
-          <div className="error">{error}</div>
-        )}
-
-        {loading && <div className="loading">Carregando...</div>}
-
-        <div className="terms-container">
-          {" "}
-          {/* Corrigido para manter a classe correta */}
+        <div>
           <input
             type="checkbox"
-            id="terms"
             checked={termsAccepted}
             onChange={(e) => setTermsAccepted(e.target.checked)}
             required
           />
-          <label htmlFor="terms">
-            Aceito os <strong>termos e condições</strong>
-          </label>
+          <label>Aceito os termos e condições</label>
         </div>
 
+        {error && <div className="error">{error}</div>}
         <button type="submit" disabled={loading}>
-          {loading ? "Enviando..." : "Cadastrar Negócio"}
+          {loading ? "Cadastrando..." : "Cadastrar Negócio"}
         </button>
       </form>
     </div>
